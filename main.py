@@ -10,8 +10,9 @@ modify the function to use for other forms.
 """
 import requests
 import os
+import re
+from email_validator import validate_email, EmailNotValidError
 from datetime import datetime
-
 
 # # Load .env file, for local use. Make sure to enable for local use
 # from dotenv import load_dotenv
@@ -19,9 +20,9 @@ from datetime import datetime
 
 
 # VAN Find and Create to update MyC info, and additional code to apply SR/ACs
-def find_and_create_and_apply(first_name, middle_name, last_name, city, state, zip, email, phone, email_subscription_status, question_name, question_response, date_updated):
+def find_and_create_and_apply(first_name, middle_name, last_name, city, state, zip, email, phone, email_subscription_status, question_name, question_response, date_updated) -> None:
     """
-    This function takes the Actionit data input, validates and formats for Find or Create VAN endpoint,
+    This function takes the Actionkit data input, validates and formats for Find or Create VAN endpoint,
     sends the data to the VAN endpoint, and then pipes the data to either creating an SQ or AC.
 
     :param first_name: str, First Name of Actionkit signup
@@ -38,6 +39,21 @@ def find_and_create_and_apply(first_name, middle_name, last_name, city, state, z
     :param date_updated: str, last updated date from ActionKit Signup
     :return: none
     """
+    # Phone Variable Validation / Handling
+    phone = phone_validation(phone)
+
+    # Email Variable Validation / Handling
+    email = email_validation(email)
+
+    # Zip code validation
+    zip = zip_validation(zip)
+
+    # All other variable validation
+    city = name_and_place_validation(city)
+    state = name_and_place_validation(state)
+    first_name = name_and_place_validation(first_name)
+    middle_name = name_and_place_validation(middle_name)
+    last_name = name_and_place_validation(last_name)
 
     # Gender Variable VAN formatting
     sex = ""
@@ -61,127 +77,38 @@ def find_and_create_and_apply(first_name, middle_name, last_name, city, state, z
         if question_response == 'Yes':
             opt_in = "I"
 
-    # Phone Variable Validation / Handling
-    phone = phone_validation(phone)
+    # Payload for Find Or Create
+    payload = {
+        "firstName": f"{first_name}",
+        "middleName": f"{middle_name}",
+        "lastName": f"{last_name}",
+        "sex": f"{sex}",
+        "emails": [
+            {
+                "email": f"{email}",
+                "subscriptionStatus": f"{subscribe_status}"  # string. One of U → unsubscribed, N → neutral, S→ subscribed.
+            }
+        ],
+        "phones": [
+            {
+                "phoneNumber": f"{phone}",
+                "phoneOptInStatus": f"{opt_in}",  # one of: I → opt in, U → unknown, O → opt out. Default, if not supplied, is U
+            }
+        ],
+        "addresses": [
+            {
+                "city": f"{city}",
+                "stateOrProvince": f"{state}",
+                "zipOrPostalCode": f"{zip}"
 
-    # Below is a basic attempt at phone variable handling. Deprecated, due to phone_validation method
-    # # Phone Variable Handling for NoneType, size, and NXX-NXX-XXXX structure + validation
-    # if phone is None:
-    #     phone = ""
-    # elif len(phone) != 10 or phone[0] in ["0", "1"] or phone[3] in ["0", "1"] or phone[:3] == "999":
-    #     phone = ""
+            }
+        ]
+    }
 
-    # Email Variable Handling. This is not comprehensive, and might have to be replaced with try/except code
-    # overhaul. At the very least, could include the email string not matching regex: r'[\<\>]+|&#'
-    # However, I don't want to import the re module if I don't have to. This regex is also applicable to any
-    # string in VAN, for any field, so could do a larger update.
-    if email[len(email) - 1] in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]:
-        email = ""
-    elif "/" in email:
-        email = ""
-
-    # Basic Other Variable Handling. Script in general probably use a try/except code overhaul.
-    # For the TX volunteer page, since many of these fields are required,
-    # only city and state are most at risk for being a NoneType.
-    if city is None:
-        city = ""
-    if state is None:
-        state = ""
-    if first_name is None:
-        first_name = ""
-    if middle_name is None:
-        middle_name = ""
-    if last_name is None:
-        last_name = ""
-    if zip is None:
-        zip = ""
-
-    # Creates payload for VAN API Call, depending on if email, phone, or both are empty
-    if phone != "" and email != "":
-        payload = {
-            "firstName": f"{first_name}",
-            "middleName": f"{middle_name}",
-            "lastName": f"{last_name}",
-            "sex": f"{sex}",
-            "emails": [
-                {
-                    "email": f"{email}",
-                    "subscriptionStatus": f"{subscribe_status}"  # string. One of U → unsubscribed, N → neutral, S→ subscribed.
-                }
-            ],
-            "phones": [
-                {
-                    "phoneNumber": f"{phone}",
-                    "phoneOptInStatus": f"{opt_in}",  # one of: I → opt in, U → unknown, O → opt out. Default, if not supplied, is U
-                }
-            ],
-            "addresses": [
-                {
-                    "city": f"{city}",
-                    "stateOrProvince": f"{state}",
-                    "zipOrPostalCode": f"{zip}"
-
-                }
-            ]
-        }
-    elif phone == "" and email != "":
-        payload = {
-            "firstName": f"{first_name}",
-            "middleName": f"{middle_name}",
-            "lastName": f"{last_name}",
-            "sex": f"{sex}",
-            "emails": [
-                {
-                    "email": f"{email}",
-                    "subscriptionStatus": f"{subscribe_status}"  # string. One of U → unsubscribed, N → neutral, S→ subscribed.
-                }
-            ],
-
-            "addresses": [
-                {
-                    "city": f"{city}",
-                    "stateOrProvince": f"{state}",
-                    "zipOrPostalCode": f"{zip}"
-
-                }
-            ]
-        }
-    elif phone != "" and email == "":
-        payload = {
-            "firstName": f"{first_name}",
-            "middleName": f"{middle_name}",
-            "lastName": f"{last_name}",
-            "sex": f"{sex}",
-            "phones": [
-                {
-                    "phoneNumber": f"{phone}",
-                    "phoneOptInStatus": f"{opt_in}",  # one of: I → opt in, U → unknown, O → opt out. Default, if not supplied, is U
-                }
-            ],
-            "addresses": [
-                {
-                    "city": f"{city}",
-                    "stateOrProvince": f"{state}",
-                    "zipOrPostalCode": f"{zip}"
-
-                }
-            ]
-        }
-    else:
-        payload = {
-            "firstName": f"{first_name}",
-            "middleName": f"{middle_name}",
-            "lastName": f"{last_name}",
-            "sex": f"{sex}",
-            "addresses": [
-                {
-                    "city": f"{city}",
-                    "stateOrProvince": f"{state}",
-                    "zipOrPostalCode": f"{zip}"
-
-                }
-            ]
-        }
+    if phone == "":
+        del payload["phones"]
+    if email == "":
+        del payload["emails"]
 
     headers = {
         "Accept": "application/json",
@@ -194,9 +121,6 @@ def find_and_create_and_apply(first_name, middle_name, last_name, city, state, z
 
     # Sending the data for Find or Create to MyC
     response = requests.post(VAN_FC_ENDPOINT_URL, json=payload, headers=headers)
-
-    # I could potentially create a try/except block here for email handling.....
-    #  if json.loads(response.text)["errors"][0]['detailedCode'] == "EMAIL":
 
     # Get the MyC VAN ID from created or found MyC profile, for SR/AC application
     dict = response.json()
@@ -297,26 +221,14 @@ def find_and_create_and_apply(first_name, middle_name, last_name, city, state, z
         elif question_response == "Lawyer/Legal Professional":
             question_response_id = 4700612
 
-    # SQ / AC question name/response Lists. Based on these lists, the last step will be to pipe the data to either apply AC or SQ
-    sq_question_name_list = ["race", "languages", "volunteer_opportunities", "identity"]
-    sq_response_name_list = ["Teacher", "Student", "Labor / Union", "Youth",
-                             "Veteran", "Disability", "LGBTQ+", "Spanish", "Vietnamese",
-                             "Mandarin or Cantonese", "Tagalog", "Hindi, Gujarati, Punjabi, other",
-                             "Urdu ", "Arabic", "American Sign Language", "Other",
-                             "African American or Black", "Asian", "Hispanic or Latinx", "Middle Eastern or North African",
-                             "Native American or Alaska Native", "Native Hawaiian or Other Pacific Islander", "White",
-                             "Host an event", "Blockwalk", "Attend a local community meeting", "Data Entry",
-                             "House a staffer", "Make calls", "Text voters", "Register voters", "Serve as a poll watcher"]
-    ac_response_name_list = ["Lawyer/Legal Professional"]
-
-    # Call either SQ application function, AC application function, or no function
-    if (question_name in sq_question_name_list) and (question_response in sq_response_name_list):
-        apply_survey_questions(van_id, question_name_id, question_response_id, date_updated_iso)
-    elif (question_name in sq_question_name_list) and (question_response in ac_response_name_list):
+    # Based on AC or SQ id value, send to apply either AC, SQ or neither
+    if question_response_id == 4700612:
         apply_activist_codes(van_id, question_response_id, date_updated_iso)
+    elif question_name_id != 0:
+        apply_survey_questions(van_id, question_name_id, question_response_id, date_updated_iso)
 
 
-def apply_survey_questions(vanid, question_name_id, question_response_id, date_updated):
+def apply_survey_questions(vanid, question_name_id, question_response_id, date_updated) -> None:
     """
     This method adds an SR for a given SQ, for the input VAN ID, using the VAN Canvass Responses Endpoint
 
@@ -358,7 +270,7 @@ def apply_survey_questions(vanid, question_name_id, question_response_id, date_u
     response = requests.post(VAN_SQ_ENDPOINT_URL, json=payload, headers=headers)
 
 
-def apply_activist_codes(vanid, activist_code_id, date_updated):
+def apply_activist_codes(vanid, activist_code_id, date_updated) -> None:
     """
     This method adds an AC for the input VAN ID, using the VAN Canvass Responses Endpoint
 
@@ -396,7 +308,7 @@ def apply_activist_codes(vanid, activist_code_id, date_updated):
     response = requests.post(VAN_AC_ENDPOINT_URL, json=payload, headers=headers)
 
 
-def actionkit_to_van():
+def actionkit_to_van() -> None:
     """
     This method queries the ActionKit endpoint with the intended SQL, and sends the data
      to the methods that ping the VAN API, for the Find or Create endpoint and Canvass Responses endpoint in VAN
@@ -405,7 +317,7 @@ def actionkit_to_van():
     # Actionkit Endpoint for SQL query
     AK_ENDPOINT_URL = '/rest/v1/report/run/sql/'
 
-    # Action Kit SQL Query
+    # Action Kit SQL Query--  Can change this as needed!
     query = "SELECT DISTINCT m.user_id, first_name, middle_name, last_name, city, state, zip, email, " \
             "normalized_phone, subscription_status as email_subscription_status, name, " \
             "value, m.id as core_action_id, " \
@@ -420,7 +332,8 @@ def actionkit_to_van():
             "LEFT JOIN core_user as u ON a.user_id = u.id WHERE page_id = 346) as l WHERE name " \
             "IN ('gender','sms_subscriber') AND value IN('Prefer not to say','Man','Yes','Woman','Non-Binary'))" \
             " as m LEFT JOIN core_phone as p ON m.user_id = p.user_id AND (DATE(m.updated_at) = DATE(p.updated_at) OR DATE(m.created_at) = DATE(p.created_at))" \
-            "WHERE (DATE(m.created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)) OR (DATE(m.updated_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY))"
+            "WHERE DATE(m.created_at) = DATE_SUB(DATE(CONVERT_TZ(CURRENT_TIMESTAMP(),'+00:00','-05:00')), INTERVAL 1 DAY) OR " \
+            "DATE(m.updated_at) = DATE_SUB(DATE(CONVERT_TZ(CURRENT_TIMESTAMP(),'+00:00','-05:00')), INTERVAL 1 DAY)"
 
     # Setting the data variable
     data = {"query": query}
@@ -438,13 +351,15 @@ def actionkit_to_van():
     for i in r:
         find_and_create_and_apply(i[1], i[2], i[3], i[4], i[5], i[6], i[7], i[8], i[9], i[10], i[11], i[14])
 
-    # # Remove at some point (for testing counts only)
+    # Remove at some point (for testing counts only)
     # print(len(r))
 
 
-def phone_validation(phone):
+def phone_validation(phone) -> str:
     """
-    This method validates phone numbers using VAN's API
+    This method validates phone numbers using VAN's API, and if number is not valid the phone variable
+    is assigned an empty string
+
     :param phone: str, phone number from ActionKit
     :return: str, empty string if phone number was not valid, or returns the vaild phone number
     """
@@ -459,6 +374,81 @@ def phone_validation(phone):
     if response.status_code == 400:
         phone = ""
     return phone
+
+
+def email_validation(email) -> str:
+    """
+    Email validation method. Does not guess what the email is by removing not allowed characters;
+    if email is not valid, it is removed.
+
+    :param email: str, input email
+    :return: email
+    """
+    # Set regex pattern
+    html_pattern = re.compile("[\<\>]+|&#")
+
+    # Handle NoneType
+    email = email or ""
+
+    # Html character exclusion and "/" character exclusion
+    if html_pattern.search(email):
+        email = ""
+    elif "/" in email:
+        email = ""
+
+    # Using email validator package to validate email
+    try:
+        # Check that the email address is valid.
+        validation = validate_email(email)
+        # Return the normalized form of the email address
+        email = validation.email
+    except EmailNotValidError:
+        email = ""
+    finally:
+        return email
+
+
+def name_and_place_validation(van_input) -> str:
+    """
+    General validation for input fields, removing numbers, html tags and html special characters
+
+    :param van_input: str, the input field (i.e. city, first_name, last_name)
+    :return: str, the van input is returned after validation
+    """
+    # Set regex pattern
+    html_pattern = re.compile("[\<\>]+|&#|[0-9]")
+
+    # Handle NoneType
+    van_input = van_input or ""
+
+    # Remove html patterns and capitalize first letter of every word
+    van_input = html_pattern.sub("", van_input).title()
+
+    return van_input
+
+
+def zip_validation(zip_input) -> str:
+    """
+    Formats input zip to zip code 5
+
+    :param zip_input: str, zipcode value from Actionkit
+    :return: str, zip_input
+    """
+    # Set regex pattern
+    html_pattern = re.compile("[^0-9]")
+
+    # Handle NoneType
+    zip_input = zip_input or ""
+
+    # Remove anything that is not a number
+    zip_input = html_pattern.sub("", zip_input)
+
+    # limit to zip5
+    zip_input = zip_input[:5]
+    if len(zip_input) != 5:
+        zip_input = ""
+
+    return zip_input
 
 
 if __name__ == '__main__':
