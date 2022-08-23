@@ -13,6 +13,8 @@ import os
 import re
 from email_validator import validate_email, EmailNotValidError
 from datetime import datetime
+from stac_utils.ticker_request import TickerRequest
+
 
 # # Load .env file, for local use. Make sure to enable for local use
 # from dotenv import load_dotenv
@@ -20,7 +22,8 @@ from datetime import datetime
 
 
 # VAN Find and Create to update MyC info, and additional code to apply SR/ACs
-def find_and_create_and_apply(first_name, middle_name, last_name, city, state, zip, email, phone, email_subscription_status, question_name, question_response, date_updated) -> None:
+def find_and_create_and_apply(first_name, middle_name, last_name, city, state, zip, email, phone,
+                              email_subscription_status, question_name, question_response, date_updated) -> None:
     """
     This function takes the Actionkit data input, validates and formats for Find or Create VAN endpoint,
     sends the data to the VAN endpoint, and then pipes the data to either creating an SQ or AC.
@@ -86,13 +89,15 @@ def find_and_create_and_apply(first_name, middle_name, last_name, city, state, z
         "emails": [
             {
                 "email": f"{email}",
-                "subscriptionStatus": f"{subscribe_status}"  # string. One of U → unsubscribed, N → neutral, S→ subscribed.
+                "subscriptionStatus": f"{subscribe_status}"
+                # string. One of U → unsubscribed, N → neutral, S→ subscribed.
             }
         ],
         "phones": [
             {
                 "phoneNumber": f"{phone}",
-                "phoneOptInStatus": f"{opt_in}",  # one of: I → opt in, U → unknown, O → opt out. Default, if not supplied, is U
+                "phoneOptInStatus": f"{opt_in}",
+                # one of: I → opt in, U → unknown, O → opt out. Default, if not supplied, is U
             }
         ],
         "addresses": [
@@ -308,11 +313,11 @@ def apply_activist_codes(vanid, activist_code_id, date_updated) -> None:
     response = requests.post(VAN_AC_ENDPOINT_URL, json=payload, headers=headers)
 
 
-def actionkit_to_van() -> None:
+def actionkit_to_van():
     """
     This method queries the ActionKit endpoint with the intended SQL, and sends the data
      to the methods that ping the VAN API, for the Find or Create endpoint and Canvass Responses endpoint in VAN
-    :return: none
+    :return: list of records updated, for stac labs ticker
     """
     # Actionkit Endpoint for SQL query
     AK_ENDPOINT_URL = '/rest/v1/report/run/sql/'
@@ -339,7 +344,9 @@ def actionkit_to_van() -> None:
     data = {"query": query}
 
     # Sending the SQL query to Action Kit, and getting back the response data
-    response = requests.post(f'https://{os.getenv("AK_USERNAME")}:{os.getenv("AK_PASSWORD")}@{os.getenv("AK_DOMAIN")}{AK_ENDPOINT_URL}', data=data)
+    response = requests.post(
+        f'https://{os.getenv("AK_USERNAME")}:{os.getenv("AK_PASSWORD")}@{os.getenv("AK_DOMAIN")}{AK_ENDPOINT_URL}',
+        data=data)
     r = response.json()
 
     # A for-loop that grabs data from the incoming rows, and sends them to MyC's Find or Create function (and additionally the AC/SQ application methods)
@@ -352,7 +359,18 @@ def actionkit_to_van() -> None:
         find_and_create_and_apply(i[1], i[2], i[3], i[4], i[5], i[6], i[7], i[8], i[9], i[10], i[11], i[14])
 
     # Remove at some point (for testing counts only)
-    # print(len(r))
+    # print(r)
+
+    # for ticker- unique record updated counts
+    unique_record_counts = len(set([i[0] for i in r]))
+
+    # for ticker- activist code updated counts
+    activist_code_update_counts = len([i[11] for i in r if i[11] == 'Lawyer/Legal Professional'])
+
+    # for ticker- survey question updated counts
+    survey_question_update_counts = len([i[11] for i in r if i[10] in ['identity', 'languages', 'volunteer_opportunities', 'race'] and i[11] not in ['Lawyer/Legal Professional']])
+
+    return [unique_record_counts, activist_code_update_counts, survey_question_update_counts]
 
 
 def phone_validation(phone) -> str:
@@ -452,4 +470,19 @@ def zip_validation(zip_input) -> str:
 
 
 if __name__ == '__main__':
-    actionkit_to_van()
+    # Send data to TDP MyC VAN; return counts for ticker
+    counts = actionkit_to_van()
+
+    # ticker object
+    ticker = TickerRequest()
+
+    # add data to ticker
+    ticker.add_data('TX', 'DNC Portal', 'find_or_create_person', 'records updated', counts[0])
+    ticker.add_data('TX', 'DNC Portal', 'add_or_remove_ac', 'records updated', counts[1])
+    ticker.add_data('TX', 'DNC Portal', 'add_survey_question', 'records updated', counts[2])
+
+    # Remove at some point (for testing counts only)
+    # print(ticker.data)
+
+    # Send data to ticker
+    ticker.send_to_ticker()
